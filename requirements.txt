@@ -9,7 +9,7 @@ numpy>=1.24.0
 opencv-python>=4.8.0
 moviepy>=1.0.3
 
-# For training RL agents (optional - choose what you need)
-# stable-baselines3>=2.0.0  # For PPO, DQN, A2C, etc.
-# torch>=2.0.0  # For neural networks
-# tensorboard>=2.14.0  # For training visualization
+# For training RL agents
+stable-baselines3>=2.0.0  # For PPO, DQN, A2C, etc.
+torch>=2.0.0  # For neural networks
+tensorboard>=2.14.0  # For training visualization
