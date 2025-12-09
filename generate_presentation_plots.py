@@ -1,15 +1,3 @@
-"""
-Automatically evaluate all models and generate presentation plots.
-
-This script:
-1. Evaluates random policy
-2. Evaluates PPO baseline
-3. Evaluates PPO + Self-Attention
-4. Generates all comparison plots
-
-Usage:
-    python generate_presentation_plots.py
-"""
 
 import os
 import numpy as np
@@ -20,10 +8,8 @@ from group5_custom_env import register_group5_env
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Register environment
 register_group5_env()
 
-# Set style
 sns.set_style("whitegrid")
 plt.rcParams['font.size'] = 11
 
@@ -34,7 +20,6 @@ print("GENERATING PRESENTATION PLOTS")
 print("="*70)
 
 # ============================================================================
-# Step 1: Evaluate Random Policy
 # ============================================================================
 
 print("\n[1/3] Evaluating Random Policy (500 episodes)...")
@@ -75,98 +60,89 @@ random_std_reward = np.std(random_rewards)
 print(f"  Success: {random_success_rate:.1f}%, Collision: {random_collision_rate:.1f}%")
 
 # ============================================================================
-# Step 2: Evaluate PPO Baseline
 # ============================================================================
 
 print("\n[2/3] Evaluating PPO Baseline (500 episodes)...")
 
 model1_path = './models/ppo_group5_env.zip'
 if not os.path.exists(model1_path):
-    print(f"  ❌ Model not found: {model1_path}")
-    print("  Using placeholder values...")
-    baseline_success_rate = 10.6
-    baseline_collision_rate = 53.2
-    baseline_avg_reward = 42.5
-    baseline_std_reward = 12.3
-    baseline_emergency_yield = 60.1
-else:
-    model1 = PPO.load(model1_path)
-    env1 = gym.make('group5-env-v0')
-    env1 = Monitor(env1)
+    print(f"  ❌ ERROR: Model not found: {model1_path}")
+    print(f"  Please train the baseline model first.")
+    print(f"  Exiting...")
+    exit(1)
+
+model1 = PPO.load(model1_path)
+env1 = gym.make('group5-env-v0')
+env1 = Monitor(env1)
+
+baseline_successes = 0
+baseline_collisions = 0
+baseline_rewards = []
+baseline_emergency_encounters = 0
+baseline_emergency_yielded = 0
+
+for episode in range(500):
+    obs, info = env1.reset()
+    done = False
+    episode_reward = 0
     
-    baseline_successes = 0
-    baseline_collisions = 0
-    baseline_rewards = []
-    baseline_emergency_encounters = 0
-    baseline_emergency_yielded = 0
+    emergency_spawned = any(hasattr(v, 'is_emergency') and v.is_emergency 
+                           for v in env1.unwrapped.road.vehicles)
+    if emergency_spawned:
+        baseline_emergency_encounters += 1
     
-    for episode in range(500):
-        obs, info = env1.reset()
-        done = False
-        episode_reward = 0
+    yielded = False
+    while not done:
+        action, _ = model1.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env1.step(action)
+        episode_reward += reward
+        done = terminated or truncated
         
-        emergency_spawned = any(hasattr(v, 'is_emergency') and v.is_emergency 
-                               for v in env1.unwrapped.road.vehicles)
-        if emergency_spawned:
-            baseline_emergency_encounters += 1
-        
-        yielded = False
-        while not done:
-            action, _ = model1.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env1.step(action)
-            episode_reward += reward
-            done = terminated or truncated
-            
-            # Check yielding
-            if emergency_spawned and not yielded:
-                ego = env1.unwrapped.vehicle
-                my_lane = ego.lane_index[2] if len(ego.lane_index) > 2 else 0
-                for v in env1.unwrapped.road.vehicles:
-                    if hasattr(v, 'is_emergency') and v.is_emergency:
-                        ev_lane = v.lane_index[2] if len(v.lane_index) > 2 else 0
-                        if my_lane != ev_lane:
-                            yielded = True
-                            break
-        
-        if yielded:
-            baseline_emergency_yielded += 1
-        
-        baseline_rewards.append(episode_reward)
-        if env1.unwrapped.vehicle.position[0] >= 625:
-            baseline_successes += 1
-        if env1.unwrapped.vehicle.crashed:
-            baseline_collisions += 1
-        
-        if (episode + 1) % 50 == 0:
-            print(f"  Progress: {episode + 1}/500", end='\r')
+        if emergency_spawned and not yielded:
+            ego = env1.unwrapped.vehicle
+            my_lane = ego.lane_index[2] if len(ego.lane_index) > 2 else 0
+            for v in env1.unwrapped.road.vehicles:
+                if hasattr(v, 'is_emergency') and v.is_emergency:
+                    v_lane = v.lane_index[2] if len(v.lane_index) > 2 else 0
+                    if v_lane == my_lane and v.position[0] > ego.position[0]:
+                        yielded = True
+                        break
     
-    print(f"  Progress: 500/500 ✓")
-    env1.close()
+    if yielded:
+        baseline_emergency_yielded += 1
     
-    baseline_success_rate = baseline_successes / 500 * 100
-    baseline_collision_rate = baseline_collisions / 500 * 100
-    baseline_avg_reward = np.mean(baseline_rewards)
-    baseline_std_reward = np.std(baseline_rewards)
-    baseline_emergency_yield = (baseline_emergency_yielded / baseline_emergency_encounters * 100) if baseline_emergency_encounters > 0 else 0
+    baseline_rewards.append(episode_reward)
+    if env1.unwrapped.vehicle.position[0] >= 625:
+        baseline_successes += 1
+    if env1.unwrapped.vehicle.crashed:
+        baseline_collisions += 1
+    
+    if (episode + 1) % 50 == 0:
+        print(f"  Progress: {episode + 1}/500", end='\r')
+
+print(f"  Progress: 500/500 ✓")
+env1.close()
+
+baseline_success_rate = baseline_successes / 500 * 100
+baseline_collision_rate = baseline_collisions / 500 * 100
+baseline_avg_reward = np.mean(baseline_rewards)
+baseline_std_reward = np.std(baseline_rewards)
+baseline_emergency_yield = (baseline_emergency_yielded / baseline_emergency_encounters * 100) if baseline_emergency_encounters > 0 else 0
 
 print(f"  Success: {baseline_success_rate:.1f}%, Collision: {baseline_collision_rate:.1f}%")
 
 # ============================================================================
-# Step 3: Evaluate PPO + Self-Attention
 # ============================================================================
 
 print("\n[3/3] Evaluating PPO + Self-Attention (500 episodes)...")
 
 model2_path = './models/ppo_attention_group5_env.zip'
 if not os.path.exists(model2_path):
-    print(f"  ❌ Model not found: {model2_path}")
-    print("  Using placeholder values...")
-    attention_success_rate = 16.0
-    attention_collision_rate = 41.8
-    attention_avg_reward = 45.3
-    attention_std_reward = 11.8
-    attention_emergency_yield = 72.3
-else:
+    print(f"  ❌ ERROR: Model not found: {model2_path}")
+    print(f"  Please train the self-attention model first.")
+    print(f"  Exiting...")
+    exit(1)
+
     model2 = PPO.load(model2_path)
     env2 = gym.make('group5-env-v0')
     env2 = Monitor(env2)
@@ -194,7 +170,6 @@ else:
             episode_reward += reward
             done = terminated or truncated
             
-            # Check yielding
             if emergency_spawned and not yielded:
                 ego = env2.unwrapped.vehicle
                 my_lane = ego.lane_index[2] if len(ego.lane_index) > 2 else 0
@@ -229,7 +204,6 @@ else:
 print(f"  Success: {attention_success_rate:.1f}%, Collision: {attention_collision_rate:.1f}%")
 
 # ============================================================================
-# Generate Plots
 # ============================================================================
 
 print(f"\n{'='*70}")
@@ -245,7 +219,6 @@ avg_rewards = [random_avg_reward, baseline_avg_reward, attention_avg_reward]
 std_rewards = [random_std_reward, baseline_std_reward, attention_std_reward]
 emergency_yielding = [0.0, baseline_emergency_yield, attention_emergency_yield]
 
-# Plot 1: Success & Collision Side by Side
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
 bars1 = ax1.bar(models, success_rates, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
@@ -276,7 +249,6 @@ plt.savefig('./plots/final_comparison.png', dpi=300, bbox_inches='tight')
 print("✅ Saved: ./plots/final_comparison.png")
 plt.close()
 
-# Plot 2: Improvement Over Baseline
 fig, ax = plt.subplots(figsize=(10, 6))
 
 metrics = ['Success\nRate', 'Collision\nReduction', 'Emergency\nYielding']
@@ -292,9 +264,10 @@ bars = ax.bar(metrics, improvements, color=bar_colors, alpha=0.7, edgecolor='bla
 
 for bar, val in zip(bars, improvements):
     height = bar.get_height()
-    y_pos = height + 2 if height > 0 else height - 2
+    y_offset = max(abs(max(improvements)), abs(min(improvements))) * 0.05
+    y_pos = height + y_offset if height >= 0 else height - y_offset
     ax.text(bar.get_x() + bar.get_width()/2., y_pos,
-            f'{val:+.1f}%', ha='center', va='bottom' if height > 0 else 'top',
+            f'{val:+.1f}%', ha='center', va='bottom' if height >= 0 else 'top',
             fontsize=12, fontweight='bold')
 
 ax.axhline(y=0, color='black', linestyle='-', linewidth=1.5)
@@ -307,7 +280,6 @@ plt.savefig('./plots/final_improvements.png', dpi=300, bbox_inches='tight')
 print("✅ Saved: ./plots/final_improvements.png")
 plt.close()
 
-# Print Summary
 print(f"\n{'='*70}")
 print("SUMMARY")
 print(f"{'='*70}")
